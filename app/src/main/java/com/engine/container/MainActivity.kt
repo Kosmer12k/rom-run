@@ -3,6 +3,8 @@ package com.engine.container
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
 import android.view.Surface
@@ -54,6 +56,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     ): Boolean
     private external fun nativeInitInputServer(socketName: String): Boolean
 
+    // Frame streamer JNI
+    private external fun nativeStartFrameStreamer(): Boolean
+    private external fun nativeStopFrameStreamer()
+    private external fun nativeGetFrameStreamerFps(): Float
+    private external fun nativeIsFrameStreamerActive(): Boolean
+
     // View References
     private lateinit var surfaceView: SurfaceView
     private lateinit var statusIndicator: View
@@ -61,6 +69,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var textDisplayStats: TextView
     private lateinit var textRootfsState: TextView
     private lateinit var extractionProgress: ProgressBar
+
+    // FPS polling
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val fpsPoller = object : Runnable {
+        override fun run() {
+            val fps = nativeGetFrameStreamerFps()
+            val active = nativeIsFrameStreamerActive()
+            val fpsStr = if (active) "%.1f fps | LIVE".format(fps) else "connecting..."
+            textDisplayStats.text = "DISPLAY: $fpsStr"
+            uiHandler.postDelayed(this, 1000)
+        }
+    }
 
     // Orchestration State Flags
     private val isSurfaceReady = AtomicBoolean(false)
@@ -86,6 +106,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             handleMotionEvent(event)
             true
         }
+
+        // Start FPS polling
+        uiHandler.postDelayed(fpsPoller, 2000)
 
         // Verify or unpack rootfs in background thread
         backgroundExecutor.execute {
@@ -280,6 +303,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     isStartingContainer.set(false)
                 }
             }
+
+            // Launch display bridge in guest after boot
+            if (zygotePid > 0) {
+                launchDisplayBridge()
+            }
         }
     }
 
@@ -436,7 +464,60 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onDestroy() {
         super.onDestroy()
+        uiHandler.removeCallbacks(fpsPoller)
+        nativeStopFrameStreamer()
         stopContainer()
         backgroundExecutor.shutdown()
     }
-}
+
+    // ========================================================================
+    // Display Bridge Launcher
+    // ========================================================================
+
+    private fun launchDisplayBridge() {
+        backgroundExecutor.execute {
+            try {
+                // Copy display_bridge.sh to /data/local/tmp via adb (or directly)
+                val bridgeScript = File(filesDir, "display_bridge.sh")
+                assets.list("")?.contains("display_bridge.sh").let { hasAsset ->
+                    if (hasAsset == true) {
+                        assets.open("display_bridge.sh").use { src ->
+                            bridgeScript.outputStream().use { dst -> src.copyTo(dst) }
+                        }
+                        bridgeScript.setExecutable(true, false)
+                        Log.i(TAG, "display_bridge.sh extracted to ${bridgeScript.absolutePath}")
+                    }
+                }
+
+                // Wait for sys.boot_completed in guest
+                var booted = false
+                repeat(60) {
+                    if (!booted) {
+                        val proc = Runtime.getRuntime().exec(arrayOf("getprop", "sys.boot_completed"))
+                        val result = proc.inputStream.bufferedReader().readLine()?.trim()
+                        if (result == "1") {
+                            booted = true
+                            Log.i(TAG, "sys.boot_completed=1 detected, launching display bridge")
+                        } else {
+                            Thread.sleep(2000)
+                        }
+                    }
+                }
+
+                if (booted && bridgeScript.exists()) {
+                    val pb = ProcessBuilder("/system/bin/sh", bridgeScript.absolutePath)
+                    pb.redirectErrorStream(true)
+                    val proc = pb.start()
+                    Log.i(TAG, "Display bridge launched (PID=${proc.pid})")
+                    runOnUiThread {
+                        textRuntimeState.text = "ENGINE: RUNNING | DISPLAY BRIDGE ACTIVE"
+                    }
+                } else {
+                    // Fallback: manual start via adb
+                    Log.w(TAG, "Display bridge not auto-started. Run manually: adb shell sh /data/local/tmp/display_bridge.sh")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch display bridge", e)
+            }
+        }
+    }

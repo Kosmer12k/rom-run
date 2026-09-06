@@ -26,6 +26,7 @@ add_library(engine SHARED
     property_service.cpp
     binder_shim.cpp
     display_renderer.cpp
+    frame_streamer.cpp
     micro_init.cpp
     input_forwarder.cpp
 )
@@ -36,6 +37,8 @@ target_link_libraries(engine
     binder_ndk
     log
     dl
+    # pthread for frame_streamer background thread
+    -lpthread
 )
 
 # Dedicated LD_PRELOAD Hook Library for Guest Processes (Zygote, ServiceManager)

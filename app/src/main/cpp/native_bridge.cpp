@@ -3,6 +3,7 @@
 #include "property_service.h"
 #include "binder_shim.h"
 #include "display_renderer.h"
+#include "frame_streamer.h"
 #include "micro_init.h"
 #include "input_forwarder.h"
 
@@ -120,6 +121,14 @@ Java_com_engine_container_MainActivity_nativeOnSurfaceCreated(
 ) {
     LOGI("JNI: nativeOnSurfaceCreated invoked");
     engine::NativeWindowManager::getInstance().setSurface(env, surface);
+
+    // Auto-start frame streamer when SurfaceView is ready
+    ANativeWindow* win = engine::NativeWindowManager::getInstance().acquireActiveWindow();
+    if (win) {
+        bool started = frame_streamer_start(win);
+        LOGI("JNI: frame_streamer_start -> %s", started ? "OK" : "FAILED");
+        ANativeWindow_release(win); // streamer acquires its own ref
+    }
 }
 
 EXPORT_SYMBOL void JNICALL
@@ -139,6 +148,7 @@ Java_com_engine_container_MainActivity_nativeOnSurfaceDestroyed(
     jobject /* thiz */
 ) {
     LOGI("JNI: nativeOnSurfaceDestroyed invoked");
+    frame_streamer_stop();
     engine::NativeWindowManager::getInstance().releaseSurface();
 }
 
@@ -232,6 +242,49 @@ Java_com_engine_container_MainActivity_isContainerRunning(
     jobject /* thiz */
 ) {
     return static_cast<jboolean>(engine::init::is_zygote_running());
+}
+
+// ============================================================================
+// Frame Streamer JNI
+// ============================================================================
+
+EXPORT_SYMBOL jboolean JNICALL
+Java_com_engine_container_MainActivity_nativeStartFrameStreamer(
+    JNIEnv* /* env */,
+    jobject /* thiz */
+) {
+    ANativeWindow* win = engine::NativeWindowManager::getInstance().acquireActiveWindow();
+    if (!win) {
+        LOGE("nativeStartFrameStreamer: no active ANativeWindow");
+        return JNI_FALSE;
+    }
+    bool ok = frame_streamer_start(win);
+    ANativeWindow_release(win);
+    return static_cast<jboolean>(ok);
+}
+
+EXPORT_SYMBOL void JNICALL
+Java_com_engine_container_MainActivity_nativeStopFrameStreamer(
+    JNIEnv* /* env */,
+    jobject /* thiz */
+) {
+    frame_streamer_stop();
+}
+
+EXPORT_SYMBOL jfloat JNICALL
+Java_com_engine_container_MainActivity_nativeGetFrameStreamerFps(
+    JNIEnv* /* env */,
+    jobject /* thiz */
+) {
+    return static_cast<jfloat>(frame_streamer_get_fps());
+}
+
+EXPORT_SYMBOL jboolean JNICALL
+Java_com_engine_container_MainActivity_nativeIsFrameStreamerActive(
+    JNIEnv* /* env */,
+    jobject /* thiz */
+) {
+    return static_cast<jboolean>(frame_streamer_is_active());
 }
 
 } // extern "C"
