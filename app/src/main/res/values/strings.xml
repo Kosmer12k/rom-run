@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Android Container Runtime</string>
+    <string name="status_runtime">RUNTIME: INITIALIZING</string>
+    <string name="status_display">DISPLAY: WAITING SURFACE</string>
+    <string name="status_rootfs">ROOTFS: CHECKING</string>
+</resources>

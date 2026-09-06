@@ -1,0 +1,37 @@
+# Build outputs
+*.o
+*.so
+*.a
+build/
+.gradle/
+.idea/
+local.properties
+*.keystore
+*.jks
+**/.DS_Store
+
+# Large binary ROM files
+*.img
+*.zip
+*.tar.gz
+*.ext4
+scratch/*.so
+scratch/*.jar
+scratch/print_binder
+scratch/print_offsets
+scratch/test_gen_null_service
+scratch/test_read_check_service
+scratch/test_read_handle
+scratch/test_read_null_binder
+scratch/test_write_null_binder
+scratch/zygote_launcher
+
+# NDK
+obj/
+libs/
+
+# IDE
+.vscode/
+*.iml
+.externalNativeBuild/
+.cxx/

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Professional Dark / Industrial Palette for Low-Level Container -->
+    <color name="container_bg_black">#08090C</color>
+    <color name="container_panel_bg">#101217</color>
+    <color name="container_border">#1D212C</color>
+    <color name="container_text_primary">#E6EDF3</color>
+    <color name="container_text_secondary">#7D8590</color>
+    <color name="container_text_muted">#484F58</color>
+    <color name="container_status_green">#00E676</color>
+    <color name="container_status_amber">#FFB300</color>
+    <color name="container_status_red">#FF5252</color>
+    <color name="container_accent_cyan">#38BDF8</color>
+</resources>

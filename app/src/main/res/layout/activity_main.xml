@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/containerRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/container_bg_black">
+
+    <!-- Primary Display Pipeline Output -->
+    <SurfaceView
+        android:id="@+id/guestSurfaceView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Minimalist Industrial HUD / Container Telemetry Bar -->
+    <LinearLayout
+        android:id="@+id/telemetryOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:layout_gravity="top"
+        android:background="#D908090C">
+
+        <!-- Top Header Status Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Status Indicator Light -->
+            <View
+                android:id="@+id/statusIndicator"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginEnd="8dp"
+                android:background="@color/container_status_amber" />
+
+            <TextView
+                android:id="@+id/textRuntimeState"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:text="ENGINE: INIT | SANDBOX: UNTRUSTED_APP"
+                android:textColor="@color/container_text_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/textDisplayStats"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="RES: --x--"
+                android:textColor="@color/container_accent_cyan"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Secondary Info Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:id="@+id/textRootfsState"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:text="ROOTFS: SCANNING LOCAL STORAGE"
+                android:textColor="@color/container_text_secondary"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/textAbiInfo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="ABI: ARM64-V8A | NATIVE"
+                android:textColor="@color/container_text_muted"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Technical Extraction Progress (Visible during initial setup) -->
+        <ProgressBar
+            android:id="@+id/extractionProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:layout_marginTop="6dp"
+            android:indeterminate="false"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="@color/container_accent_cyan"
+            android:visibility="gone" />
+    </LinearLayout>
+
+</FrameLayout>
