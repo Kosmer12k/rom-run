@@ -234,12 +234,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
         backgroundExecutor.execute {
             val rootfsDir = File(filesDir, ROOTFS_DIR_NAME)
-            val arm64HookTarget = File(filesDir, "libvfs_hook_arm64.so")
+            val primaryAbi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+            val arm64HookTarget = File(filesDir, "libzygote_shim.so")
             try {
                 val apk = java.util.zip.ZipFile(File(applicationInfo.sourceDir))
                 
-                // 1. Extract libvfs_hook.so
-                val hookEntry = apk.getEntry("lib/arm64-v8a/libvfs_hook.so")
+                // 1. Extract libzygote_shim.so for host primary ABI
+                val hookEntry = apk.getEntry("lib/$primaryAbi/libzygote_shim.so")
+                    ?: apk.getEntry("lib/arm64-v8a/libzygote_shim.so")
                 if (hookEntry != null) {
                     apk.getInputStream(hookEntry).use { input ->
                         arm64HookTarget.outputStream().use { output ->
@@ -248,7 +250,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     }
                     arm64HookTarget.setReadable(true, false)
                     arm64HookTarget.setExecutable(true, false)
-                    Log.i(TAG, "Extracted arm64 libvfs_hook.so: ${arm64HookTarget.length()} bytes")
+                    Log.i(TAG, "Extracted $primaryAbi libzygote_shim.so: ${arm64HookTarget.length()} bytes")
                 }
 
                 // 2. Extract libc++_shared.so into guest system/lib64
@@ -271,7 +273,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 Log.w(TAG, "Failed extracting arm64 native libs: ${e.message}")
             }
 
-            val primaryHookFile = File(applicationInfo.nativeLibraryDir, "libvfs_hook.so")
+            val primaryHookFile = File(applicationInfo.nativeLibraryDir, "libzygote_shim.so")
             val hookSoPath = if (arm64HookTarget.exists() && arm64HookTarget.length() > 0L) {
                 arm64HookTarget.absolutePath
             } else if (primaryHookFile.exists()) {
@@ -507,8 +509,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 if (booted && bridgeScript.exists()) {
                     val pb = ProcessBuilder("/system/bin/sh", bridgeScript.absolutePath)
                     pb.redirectErrorStream(true)
-                    val proc = pb.start()
-                    Log.i(TAG, "Display bridge launched (PID=${proc.pid})")
+                    pb.start()
+                    Log.i(TAG, "Display bridge launched successfully")
                     runOnUiThread {
                         textRuntimeState.text = "ENGINE: RUNNING | DISPLAY BRIDGE ACTIVE"
                     }
@@ -516,8 +518,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     // Fallback: manual start via adb
                     Log.w(TAG, "Display bridge not auto-started. Run manually: adb shell sh /data/local/tmp/display_bridge.sh")
                 }
-            } catch (e: Exception) {
+                } catch (e: Exception) {
                 Log.e(TAG, "Failed to launch display bridge", e)
             }
         }
     }
+}

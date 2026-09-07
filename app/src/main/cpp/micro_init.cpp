@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <cerrno>
 #include <cstring>
 #include <thread>
@@ -90,7 +92,8 @@ void run_logcat_reader(int read_fd) {
 namespace engine::init {
 
 void setup_guest_env(const std::string& rootfs_path, const std::string& hook_so_path) {
-    LOGI_INIT("Setting up guest environment variables (rootfs=%s)", rootfs_path.c_str());
+    LOGI_INIT("Setting up guest environment variables (rootfs=%s, hook=%s)",
+              rootfs_path.c_str(), hook_so_path.c_str());
 
     // Ensure essential dalvik-cache directory exists
     std::string cache_dir = rootfs_path + "/data/dalvik-cache/arm64";
@@ -100,63 +103,110 @@ void setup_guest_env(const std::string& rootfs_path, const std::string& hook_so_
 
     // 1. AOSP partition roots & Container Rootfs
     setenv("CONTAINER_ROOTFS", rootfs_path.c_str(), 1);
-    setenv("ANDROID_ROOT", (rootfs_path + "/system").c_str(), 1);
+    setenv("ANDROID_ROOT", "/system", 1);
     setenv("ANDROID_DATA", (rootfs_path + "/data").c_str(), 1);
-    setenv("ANDROID_ART_ROOT", (rootfs_path + "/apex/com.android.art").c_str(), 1);
-    setenv("ANDROID_TZDATA_ROOT", (rootfs_path + "/apex/com.android.tzdata").c_str(), 1);
-    setenv("ANDROID_I18N_ROOT", (rootfs_path + "/apex/com.android.i18n").c_str(), 1);
+    setenv("ANDROID_ART_ROOT", "/apex/com.android.art", 1);
+    setenv("ANDROID_TZDATA_ROOT", "/apex/com.android.tzdata", 1);
+    setenv("ANDROID_I18N_ROOT", "/apex/com.android.i18n", 1);
 
-    // 2. Android 13 DEX2OATBOOTCLASSPATH and BOOTCLASSPATH jars
-    std::string dex2oat_bcp =
-        rootfs_path + "/apex/com.android.art/javalib/core-oj.jar:" +
-        rootfs_path + "/apex/com.android.art/javalib/core-libart.jar:" +
-        rootfs_path + "/apex/com.android.art/javalib/okhttp.jar:" +
-        rootfs_path + "/apex/com.android.art/javalib/bouncycastle.jar:" +
-        rootfs_path + "/apex/com.android.art/javalib/apache-xml.jar";
-    setenv("DEX2OATBOOTCLASSPATH", dex2oat_bcp.c_str(), 1);
+    // 2. Complete Android 13 BOOTCLASSPATH, SYSTEMSERVERCLASSPATH, DEX2OATBOOTCLASSPATH
+    const char* bcp =
+        "/apex/com.android.art/javalib/core-oj.jar:"
+        "/apex/com.android.art/javalib/core-libart.jar:"
+        "/apex/com.android.art/javalib/okhttp.jar:"
+        "/apex/com.android.art/javalib/bouncycastle.jar:"
+        "/apex/com.android.art/javalib/apache-xml.jar:"
+        "/system/framework/framework.jar:"
+        "/system/framework/framework-graphics.jar:"
+        "/system/framework/framework-location.jar:"
+        "/system/framework/framework-connectivity-b.jar:"
+        "/system/framework/ext.jar:"
+        "/system/framework/telephony-common.jar:"
+        "/system/framework/voip-common.jar:"
+        "/system/framework/ims-common.jar:"
+        "/system/framework/framework-platformcrashrecovery.jar:"
+        "/system/framework/framework-ondeviceintelligence-platform.jar:"
+        "/apex/com.android.i18n/javalib/core-icu4j.jar:"
+        "/apex/com.android.adservices/javalib/framework-adservices.jar:"
+        "/apex/com.android.adservices/javalib/framework-sdksandbox.jar:"
+        "/apex/com.android.appsearch/javalib/framework-appsearch.jar:"
+        "/apex/com.android.btservices/javalib/framework-bluetooth.jar:"
+        "/apex/com.android.configinfrastructure/javalib/framework-configinfrastructure.jar:"
+        "/apex/com.android.conscrypt/javalib/conscrypt.jar:"
+        "/apex/com.android.devicelock/javalib/framework-devicelock.jar:"
+        "/apex/com.android.healthfitness/javalib/framework-healthfitness.jar:"
+        "/apex/com.android.ipsec/javalib/android.net.ipsec.ike.jar:"
+        "/apex/com.android.media/javalib/updatable-media.jar:"
+        "/apex/com.android.mediaprovider/javalib/framework-mediaprovider.jar:"
+        "/apex/com.android.mediaprovider/javalib/framework-pdf.jar:"
+        "/apex/com.android.mediaprovider/javalib/framework-pdf-v.jar:"
+        "/apex/com.android.mediaprovider/javalib/framework-photopicker.jar:"
+        "/apex/com.android.nfcservices/javalib/framework-nfc.jar:"
+        "/apex/com.android.ondevicepersonalization/javalib/framework-ondevicepersonalization.jar:"
+        "/apex/com.android.os.statsd/javalib/framework-statsd.jar:"
+        "/apex/com.android.permission/javalib/framework-permission.jar:"
+        "/apex/com.android.permission/javalib/framework-permission-s.jar:"
+        "/apex/com.android.profiling/javalib/framework-profiling.jar:"
+        "/apex/com.android.scheduling/javalib/framework-scheduling.jar:"
+        "/apex/com.android.sdkext/javalib/framework-sdkextensions.jar:"
+        "/apex/com.android.tethering/javalib/framework-connectivity.jar:"
+        "/apex/com.android.tethering/javalib/framework-connectivity-t.jar:"
+        "/apex/com.android.tethering/javalib/framework-tethering.jar:"
+        "/apex/com.android.uwb/javalib/framework-uwb.jar:"
+        "/apex/com.android.virt/javalib/framework-virtualization.jar:"
+        "/apex/com.android.wifi/javalib/framework-wifi.jar";
+    setenv("BOOTCLASSPATH", bcp, 1);
 
-    std::string bcp = dex2oat_bcp + ":" +
-        rootfs_path + "/apex/com.android.i18n/javalib/core-icu4j.jar:" +
-        rootfs_path + "/system/framework/framework.jar:" +
-        rootfs_path + "/system/framework/framework-graphics.jar:" +
-        rootfs_path + "/system/framework/ext.jar:" +
-        rootfs_path + "/system/framework/telephony-common.jar:" +
-        rootfs_path + "/system/framework/voip-common.jar:" +
-        rootfs_path + "/system/framework/ims-common.jar";
-    setenv("BOOTCLASSPATH", bcp.c_str(), 1);
+    const char* sscp =
+        "/system/framework/com.android.location.provider.jar:"
+        "/system/framework/services.jar:"
+        "/apex/com.android.adservices/javalib/service-adservices.jar:"
+        "/apex/com.android.adservices/javalib/service-sdksandbox.jar:"
+        "/apex/com.android.appsearch/javalib/service-appsearch.jar:"
+        "/apex/com.android.art/javalib/service-art.jar:"
+        "/apex/com.android.configinfrastructure/javalib/service-configinfrastructure.jar:"
+        "/apex/com.android.healthfitness/javalib/service-healthfitness.jar:"
+        "/apex/com.android.media/javalib/service-media-s.jar:"
+        "/apex/com.android.ondevicepersonalization/javalib/service-ondevicepersonalization.jar:"
+        "/apex/com.android.permission/javalib/service-permission.jar:"
+        "/apex/com.android.rkpd/javalib/service-rkp.jar:"
+        "/apex/com.android.virt/javalib/service-virtualization.jar";
+    setenv("SYSTEMSERVERCLASSPATH", sscp, 1);
 
-    // 3. Dynamic linker and runtime library search paths
-    // Check if running on an x86 host using binfmt_misc / houdini64
-    bool is_houdini_host = (access("/system/bin/houdini64", F_OK) == 0);
-    if (!is_houdini_host) {
-        std::string ld_lib_path =
-            rootfs_path + "/apex/com.android.art/lib64:" +
-            rootfs_path + "/apex/com.android.runtime/lib64/bionic:" +
-            rootfs_path + "/system/lib64:" +
-            rootfs_path + "/vendor/lib64";
-        setenv("LD_LIBRARY_PATH", ld_lib_path.c_str(), 1);
-    } else {
-        // On Houdini hosts, unset host LD_LIBRARY_PATH to avoid x86 linker loading ARM64 libs
-        unsetenv("LD_LIBRARY_PATH");
-    }
+    const char* dex2oat_bcp =
+        "/apex/com.android.art/javalib/core-oj.jar:"
+        "/apex/com.android.art/javalib/core-libart.jar:"
+        "/apex/com.android.art/javalib/okhttp.jar:"
+        "/apex/com.android.art/javalib/bouncycastle.jar:"
+        "/apex/com.android.art/javalib/apache-xml.jar:"
+        "/system/framework/framework.jar:"
+        "/system/framework/framework-graphics.jar:"
+        "/system/framework/framework-location.jar:"
+        "/system/framework/framework-connectivity-b.jar:"
+        "/system/framework/ext.jar:"
+        "/system/framework/telephony-common.jar:"
+        "/system/framework/voip-common.jar:"
+        "/system/framework/ims-common.jar:"
+        "/system/framework/framework-platformcrashrecovery.jar:"
+        "/system/framework/framework-ondeviceintelligence-platform.jar:"
+        "/apex/com.android.i18n/javalib/core-icu4j.jar";
+    setenv("DEX2OATBOOTCLASSPATH", dex2oat_bcp, 1);
+
+    // 3. Dynamic linker and runtime library paths
+    unsetenv("LD_LIBRARY_PATH");
 
     // 4. Executable execution PATH
     std::string path_env =
         rootfs_path + "/system/bin:" +
-        rootfs_path + "/apex/com.android.runtime/bin:" +
-        rootfs_path + "/apex/com.android.art/bin";
+        "/system/bin:" +
+        "/apex/com.android.runtime/bin:" +
+        "/apex/com.android.art/bin";
     setenv("PATH", path_env.c_str(), 1);
 
-    // 5. Injected VFS & Fake Permission Hook Library (if provided)
+    // 5. Injected Zygote Shim & VFS Hook Library
     if (!hook_so_path.empty()) {
-        if (is_houdini_host) {
-            unsetenv("LD_PRELOAD");
-            setenv("ARM_LD_PRELOAD", hook_so_path.c_str(), 1);
-            LOGI_INIT("Configured ARM_LD_PRELOAD=%s (Houdini translation detected)", hook_so_path.c_str());
-        } else {
-            setenv("LD_PRELOAD", hook_so_path.c_str(), 1);
-            LOGI_INIT("Configured LD_PRELOAD=%s (Native ARM64 host)", hook_so_path.c_str());
-        }
+        setenv("LD_PRELOAD", hook_so_path.c_str(), 1);
+        LOGI_INIT("Configured LD_PRELOAD=%s", hook_so_path.c_str());
     }
 }
 
@@ -211,12 +261,62 @@ pid_t spawn_zygote(const std::string& rootfs_path, const std::string& hook_so_pa
         // Setup environment variables in child memory
         setup_guest_env(rootfs_path, hook_so_path);
 
+        // Setup Abstract Zygote Server Socket (@container_zygote)
+        int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock_fd >= 0) {
+            struct sockaddr_un sun{};
+            memset(&sun, 0, sizeof(sun));
+            sun.sun_family = AF_UNIX;
+            sun.sun_path[0] = '\0';
+            const char* sock_name = "container_zygote";
+            memcpy(sun.sun_path + 1, sock_name, strlen(sock_name));
+            socklen_t addr_len = sizeof(sa_family_t) + 1 + strlen(sock_name);
+            bind(sock_fd, (struct sockaddr*)&sun, addr_len);
+            listen(sock_fd, 50);
+
+            char fd_buf[16];
+            snprintf(fd_buf, sizeof(fd_buf), "%d", sock_fd);
+            setenv("ANDROID_SOCKET_zygote", fd_buf, 1);
+
+            int flags = fcntl(sock_fd, F_GETFD);
+            fcntl(sock_fd, F_SETFD, flags & ~FD_CLOEXEC);
+        }
+
+        // Setup Abstract USAP Pool Socket (@container_usap_pool_primary)
+        int usap_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (usap_fd >= 0) {
+            struct sockaddr_un sun{};
+            memset(&sun, 0, sizeof(sun));
+            sun.sun_family = AF_UNIX;
+            sun.sun_path[0] = '\0';
+            const char* usap_name = "container_usap_pool_primary";
+            memcpy(sun.sun_path + 1, usap_name, strlen(usap_name));
+            bind(usap_fd, (struct sockaddr*)&sun, sizeof(sa_family_t) + 1 + strlen(usap_name));
+            listen(usap_fd, 50);
+
+            char usap_buf[16];
+            snprintf(usap_buf, sizeof(usap_buf), "%d", usap_fd);
+            setenv("ANDROID_SOCKET_usap_pool_primary", usap_buf, 1);
+
+            int uflags = fcntl(usap_fd, F_GETFD);
+            fcntl(usap_fd, F_SETFD, uflags & ~FD_CLOEXEC);
+        }
+
+        // Close all inherited file descriptors from host process to pass Zygote FD checks
+        for (int fd = 3; fd < 1024; ++fd) {
+            if (fd != sock_fd && fd != usap_fd) {
+                close(fd);
+            }
+        }
+
         // Path to target AOSP app_process64 binary
         std::string binary_path = rootfs_path + "/system/bin/app_process64";
 
         // Standard AOSP Zygote initialization arguments
         char* const argv[] = {
-            const_cast<char*>("zygote64"),
+            const_cast<char*>("app_process64"),
+            const_cast<char*>("-Xzygote"),
+            const_cast<char*>("-Xallowinmemorycompilation"),
             const_cast<char*>("/system/bin"),
             const_cast<char*>("--zygote"),
             const_cast<char*>("--start-system-server"),

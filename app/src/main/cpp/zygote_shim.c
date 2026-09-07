@@ -44,22 +44,7 @@ static int g_service_count = 0;
 #define DUMMY_MAX_HANDLE  16
 
 static void init_synthetic_services() {
-    if (g_service_count == 0) {
-        strncpy(g_services[0].name, "apexservice", sizeof(g_services[0].name) - 1);
-        g_services[0].binder.hdr.type = BINDER_TYPE_HANDLE;
-        g_services[0].binder.flags = 0x13;
-        g_services[0].binder.handle = APEX_HANDLE;
-        g_services[0].binder.cookie = 0;
-
-        strncpy(g_services[1].name, "stats", sizeof(g_services[1].name) - 1);
-        g_services[1].binder.hdr.type = BINDER_TYPE_HANDLE;
-        g_services[1].binder.flags = 0x13;
-        g_services[1].binder.handle = STATS_HANDLE;
-        g_services[1].binder.cookie = 0;
-
-        g_service_count = 2;
-        LOGI("init_synthetic_services: pre-registered apexservice (handle=1) and stats (handle=2)");
-    }
+    // Dynamic in-memory registry: services are registered dynamically via addService
 }
 
 // Reply ring buffers
@@ -176,58 +161,50 @@ EXPORT int ioctl(int fd, int request, ...) {
                         if (tr->code == 4 || tr->code == 2) {
                             // checkService2 (4) / getService2 (2) -> returns Service union
                             int32_t *p32 = (int32_t *)payload;
-                            p32[0] = 0;  // EX_NONE
-                            p32[1] = 1;  // Service present
-                            p32[2] = 0;  // Tag 0: serviceWithMetadata
-                            p32[3] = 1;  // ServiceWithMetadata present
-                            p32[4] = 36; // parcelable_size = 36 (4 + 28 for flat_binder_object + 4 for isLazyService)
-
                             if (found_idx >= 0) {
-                                memcpy(payload + 20, &g_services[found_idx].binder, sizeof(struct flat_binder_object));
-                                *(int32_t *)(payload + 48) = 0; // isLazyService = false
-                                offsets[0] = 20; // binder object offset in payload
-                                reply_tr->data_size = 52;
+                                p32[0] = 0;  // EX_NONE
+                                p32[1] = 1;  // Service is_present = 1
+                                p32[2] = 1;  // Tag 1 (raw IBinder)
+                                p32[3] = 0;  // 4-byte padding so flat_binder_object is 8-byte aligned at offset 16!
+                                struct flat_binder_object *fbo = (struct flat_binder_object *)(payload + 16);
+                                *fbo = g_services[found_idx].binder;
+                                offsets[0] = 16;
+                                reply_tr->data_size = 16 + sizeof(struct flat_binder_object);
                                 reply_tr->offsets_size = sizeof(binder_size_t);
                                 reply_tr->data.ptr.buffer = (binder_uintptr_t)payload;
                                 reply_tr->data.ptr.offsets = (binder_uintptr_t)offsets;
                                 LOGI("ServiceManager: RETURNING registered service [%s] for code=%u", sname, tr->code);
                             } else {
-                                struct flat_binder_object *null_fbo = (struct flat_binder_object *)(payload + 20);
-                                null_fbo->hdr.type = BINDER_TYPE_BINDER;
-                                null_fbo->flags = 0x13;
-                                null_fbo->binder = 0;
-                                null_fbo->cookie = 0;
-                                *(int32_t *)(payload + 48) = 0; // isLazyService = false
-                                reply_tr->data_size = 52;
+                                p32[0] = 0;  // EX_NONE
+                                p32[1] = 0;  // Service is_present = 0 (NULL)
+                                reply_tr->data_size = 8;
                                 reply_tr->offsets_size = 0;
                                 reply_tr->data.ptr.buffer = (binder_uintptr_t)payload;
                                 reply_tr->data.ptr.offsets = 0;
-                                LOGI("ServiceManager: Service [%s] NOT FOUND -> returning null ServiceWithMetadata for code=%u", sname, tr->code);
+                                LOGI("ServiceManager: Service [%s] NOT FOUND -> returning null Service for code=%u", sname, tr->code);
                             }
                         } else if (tr->code == 1 || tr->code == 3) {
                             // getService (1) / checkService (3) -> returns @nullable IBinder
                             int32_t *p32 = (int32_t *)payload;
                             p32[0] = 0; // EX_NONE
+                            p32[1] = 0; // 4-byte padding for 8-byte alignment of flat_binder_object at offset 8!
+                            struct flat_binder_object *fbo = (struct flat_binder_object *)(payload + 8);
                             if (found_idx >= 0) {
-                                memcpy(payload + 4, &g_services[found_idx].binder, sizeof(struct flat_binder_object));
-                                offsets[0] = 4;
-                                reply_tr->data_size = 4 + sizeof(struct flat_binder_object);
-                                reply_tr->offsets_size = sizeof(binder_size_t);
-                                reply_tr->data.ptr.buffer = (binder_uintptr_t)payload;
-                                reply_tr->data.ptr.offsets = (binder_uintptr_t)offsets;
+                                *fbo = g_services[found_idx].binder;
                                 LOGI("ServiceManager: RETURNING registered binder for [%s] code=%u", sname, tr->code);
                             } else {
-                                struct flat_binder_object *null_fbo = (struct flat_binder_object *)(payload + 4);
-                                null_fbo->hdr.type = BINDER_TYPE_BINDER;
-                                null_fbo->flags = 0x13;
-                                null_fbo->binder = 0;
-                                null_fbo->cookie = 0;
-                                reply_tr->data_size = 32;
-                                reply_tr->offsets_size = 0;
-                                reply_tr->data.ptr.buffer = (binder_uintptr_t)payload;
-                                reply_tr->data.ptr.offsets = 0;
+                                memset(fbo, 0, sizeof(*fbo));
+                                fbo->hdr.type = BINDER_TYPE_BINDER;
+                                fbo->flags = 0x13;
+                                fbo->binder = 0;
+                                fbo->cookie = 0;
                                 LOGI("ServiceManager: Binder for [%s] NOT FOUND -> returning null binder for code=%u", sname, tr->code);
                             }
+                            offsets[0] = 8;
+                            reply_tr->data_size = 8 + sizeof(struct flat_binder_object);
+                            reply_tr->offsets_size = sizeof(binder_size_t);
+                            reply_tr->data.ptr.buffer = (binder_uintptr_t)payload;
+                            reply_tr->data.ptr.offsets = (binder_uintptr_t)offsets;
                         } else if (tr->code == 5) {
                             // addService -> void
                             int32_t *p32 = (int32_t *)payload;
@@ -428,3 +405,57 @@ EXPORT int setuid(uid_t u) { return 0; }
 EXPORT int setgid(gid_t g) { return 0; }
 EXPORT int setgroups(size_t s, const gid_t *l) { return 0; }
 EXPORT int capset(void *h, const void *d) { return 0; }
+
+EXPORT int fstat(int fd, struct stat *buf) {
+    static int (*real_fstat)(int, struct stat *) = NULL;
+    if (!real_fstat) real_fstat = (int (*)(int, struct stat *))dlsym(RTLD_NEXT, "fstat");
+    int res = real_fstat(fd, buf);
+    if (res == 0 && buf && S_ISFIFO(buf->st_mode)) {
+        buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
+    }
+    return res;
+}
+
+EXPORT int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+    static int (*real_fstatat)(int, const char *, struct stat *, int) = NULL;
+    if (!real_fstatat) real_fstatat = (int (*)(int, const char *, struct stat *, int))dlsym(RTLD_NEXT, "fstatat");
+    int res = real_fstatat(dirfd, pathname, buf, flags);
+    if (res == 0 && buf && S_ISFIFO(buf->st_mode)) {
+        buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
+    }
+    return res;
+}
+
+EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+    static ssize_t (*real_readlink)(const char *, char *, size_t) = NULL;
+    if (!real_readlink) real_readlink = (ssize_t (*)(const char *, char *, size_t))dlsym(RTLD_NEXT, "readlink");
+    ssize_t res = real_readlink(path, buf, bufsiz);
+    if (res > 0 && path && strstr(path, "/proc/self/fd/")) {
+        if (buf && (strncmp(buf, "pipe:", 5) == 0 || strncmp(buf, "socket:", 7) == 0)) {
+            const char *fake = "/dev/null";
+            size_t l = strlen(fake);
+            if (bufsiz > l) {
+                memcpy(buf, fake, l + 1);
+                return l;
+            }
+        }
+    }
+    return res;
+}
+
+EXPORT ssize_t readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
+    static ssize_t (*real_readlinkat)(int, const char *, char *, size_t) = NULL;
+    if (!real_readlinkat) real_readlinkat = (ssize_t (*)(int, const char *, char *, size_t))dlsym(RTLD_NEXT, "readlinkat");
+    ssize_t res = real_readlinkat(dirfd, pathname, buf, bufsiz);
+    if (res > 0 && pathname && strstr(pathname, "/proc/self/fd/")) {
+        if (buf && (strncmp(buf, "pipe:", 5) == 0 || strncmp(buf, "socket:", 7) == 0)) {
+            const char *fake = "/dev/null";
+            size_t l = strlen(fake);
+            if (bufsiz > l) {
+                memcpy(buf, fake, l + 1);
+                return l;
+            }
+        }
+    }
+    return res;
+}

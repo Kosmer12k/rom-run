@@ -37,8 +37,7 @@ target_link_libraries(engine
     binder_ndk
     log
     dl
-    # pthread for frame_streamer background thread
-    -lpthread
+    # Note: pthread is built into libc on Android NDK, no -lpthread needed
 )
 
 # Dedicated LD_PRELOAD Hook Library for Guest Processes (Zygote, ServiceManager)
@@ -56,5 +55,15 @@ target_compile_definitions(vfs_hook PRIVATE VFS_HOOK_SHARED=1)
 target_compile_options(vfs_hook PRIVATE -fno-plt -fno-exceptions -fno-rtti)
 set_target_properties(vfs_hook PROPERTIES LINK_FLAGS "-nostdlib++ -Wl,-z,now -Wl,-z,relro")
 
+# Standalone Zygote & SystemServer Shim Library
+add_library(zygote_shim SHARED
+    zygote_shim.c
+)
 
+target_link_libraries(zygote_shim
+    log
+    dl
+)
 
+target_compile_options(zygote_shim PRIVATE -fno-plt -fno-exceptions -fno-rtti -O3)
+set_target_properties(zygote_shim PROPERTIES LINK_FLAGS "-nostdlib++ -Wl,-z,now -Wl,-z,relro")
